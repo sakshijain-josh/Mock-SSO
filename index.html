@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mock SSO Application</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .section {
+            width: 50%;
+            padding: 40px;
+            overflow-y: auto;
+        }
+
+        .app-section {
+            background-color: #ffffff;
+            border-right: 2px solid #ddd;
+        }
+
+        .idp-section {
+            background-color: #f9f9f9;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 30px;
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-size: 14px;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+            font-family: Arial, sans-serif;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        button {
+            padding: 12px 24px;
+            background-color: #333;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background-color: #555;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .payload-display {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            min-height: 100px;
+        }
+
+        .payload-display h3 {
+            font-size: 16px;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .payload-display pre {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #555;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 10px;
+            border-left: 3px solid #333;
+            background-color: #f0f0f0;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .highlight {
+            border: 2px solid #333;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- App Section (Left) -->
+        <div class="section app-section" id="appSection">
+            <h1>Application</h1>
+
+            <div class="form-group">
+                <button id="loginBtn">Login with Service</button>
+            </div>
+
+            <div class="status" id="appStatus">
+                Ready to login
+            </div>
+
+            <div class="form-group" id="tokenGroup" style="display: none;">
+                <label>Access Token (Auto-filled):</label>
+                <textarea id="accessToken" readonly></textarea>
+            </div>
+
+            <div class="form-group" id="validateGroup" style="display: none;">
+                <button id="validateBtn">Validate</button>
+            </div>
+
+            <div class="payload-display" id="payloadDisplay" style="display: none;">
+                <h3>Token Payload:</h3>
+                <pre id="payloadContent"></pre>
+            </div>
+        </div>
+
+        <!-- IdP Section (Right) -->
+        <div class="section idp-section" id="idpSection">
+            <h1>Identity Provider</h1>
+
+            <div id="idpForm">
+                <div class="form-group">
+                    <label for="username">Username:</label>
+                    <input type="text" id="username" placeholder="Enter any username">
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password:</label>
+                    <input type="password" id="password" placeholder="Enter any password">
+                </div>
+
+                <div class="form-group">
+                    <button id="idpLoginBtn" disabled>Login</button>
+                </div>
+
+                <div class="status" id="idpStatus">
+                    Waiting for login request...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+
+        let currentToken = null;
+
+        const loginBtn = document.getElementById('loginBtn');
+        const appStatus = document.getElementById('appStatus');
+        const tokenGroup = document.getElementById('tokenGroup');
+        const accessToken = document.getElementById('accessToken');
+        const validateGroup = document.getElementById('validateGroup');
+        const validateBtn = document.getElementById('validateBtn');
+        const payloadDisplay = document.getElementById('payloadDisplay');
+        const payloadContent = document.getElementById('payloadContent');
+
+        const idpSection = document.getElementById('idpSection');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const idpLoginBtn = document.getElementById('idpLoginBtn');
+        const idpStatus = document.getElementById('idpStatus');
+
+        loginBtn.addEventListener('click', () => {
+            appStatus.textContent = 'Redirecting to Identity Provider...';
+
+            idpSection.classList.add('highlight');
+            idpLoginBtn.disabled = false;
+            idpStatus.textContent = 'Please enter your credentials and login';
+
+            currentToken = null;
+            accessToken.value = '';
+            tokenGroup.style.display = 'none';
+            validateGroup.style.display = 'none';
+            payloadDisplay.style.display = 'none';
+        });
+
+        idpLoginBtn.addEventListener('click', async () => {
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+
+            if (!username || !password) {
+                idpStatus.textContent = 'Please enter both username and password';
+                return;
+            }
+
+            idpStatus.textContent = 'Authenticating...';
+            idpLoginBtn.disabled = true;
+
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    currentToken = data.access_token;
+
+                    idpStatus.textContent = `Authentication successful! Token generated.`;
+                    idpSection.classList.remove('highlight');
+
+                    accessToken.value = currentToken;
+                    tokenGroup.style.display = 'block';
+                    validateGroup.style.display = 'block';
+                    appStatus.textContent = 'Access token received from Identity Provider';
+
+                    usernameInput.value = '';
+                    passwordInput.value = '';
+                    idpLoginBtn.disabled = true;
+                } else {
+                    idpStatus.textContent = 'Authentication failed';
+                    idpLoginBtn.disabled = false;
+                }
+            } catch (error) {
+                idpStatus.textContent = 'Error: Could not connect to server';
+                idpLoginBtn.disabled = false;
+            }
+        });
+
+        validateBtn.addEventListener('click', async () => {
+            if (!currentToken) {
+                appStatus.textContent = 'No token to validate';
+                return;
+            }
+
+            appStatus.textContent = 'Validating token...';
+            validateBtn.disabled = true;
+
+            try {
+                const response = await fetch(`${API_BASE}/validate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ token: currentToken })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    appStatus.textContent = 'Token validated successfully';
+                    payloadDisplay.style.display = 'block';
+                    payloadContent.textContent = JSON.stringify(data.payload, null, 2);
+                } else {
+                    appStatus.textContent = 'Token validation failed: ' + data.error;
+                    payloadDisplay.style.display = 'none';
+                }
+            } catch (error) {
+                appStatus.textContent = 'Error: Could not validate token';
+            } finally {
+                validateBtn.disabled = false;
+            }
+        });
+
+        usernameInput.addEventListener('input', checkIdpFormValidity);
+        passwordInput.addEventListener('input', checkIdpFormValidity);
+
+        function checkIdpFormValidity() {
+            const isValid = usernameInput.value.trim() && passwordInput.value.trim();
+            if (idpLoginBtn.disabled === false || idpSection.classList.contains('highlight')) {
+                idpLoginBtn.disabled = !isValid;
+            }
+        }
+    </script>
+</body>
+
+</html>
